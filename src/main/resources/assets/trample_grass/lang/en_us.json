@@ -1,0 +1,5 @@
+{
+  "trample_grass.configuration.duration": "Watch duration",
+  "trample_grass.configuration.chance": "Path chance",
+  "trample_grass.configuration.debug": "Debug logging"
+}
