@@ -27,6 +27,8 @@ Config file: `config/trample_grass-common.toml`
 ## Development Checklist
 
 - Local `JAVA_HOME=/usr/lib/jvm/java-21-openjdk ./gradlew build` passes.
+- GitHub Actions build passes on push and pull request.
+- CI uploads `build/libs/*.jar` artifacts from workflow runs.
 - Runtime smoke test: start a server or single-player world, set a low `watchDurationTicks` and high `pathChancePercent`, then walk multiple entities over the same grass block and confirm it can become a dirt path.
 
 ## License
