@@ -31,6 +31,6 @@ Config file: `config/trample_grass-common.toml`
 
 ## License
 
-All Rights Reserved for original Trample Grass code and assets.
+Trample Grass is dedicated to the public domain under CC0 1.0 Universal.
 
 NeoForge MDK template files remain under their original MIT license; see `TEMPLATE_LICENSE.txt`.
