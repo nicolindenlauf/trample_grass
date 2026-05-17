@@ -8,6 +8,7 @@ Config file: `config/trample_grass-common.toml`
 
 - `trampling.watchDurationTicks`: How long a grass block stays watched after an entity steps on it. `20` ticks is roughly one second.
 - `trampling.pathChancePercent`: Percent chance that a qualifying later step turns watched grass into a dirt path. `0` disables conversion; `100` makes qualifying steps always convert.
+- `regrowth.pathRegrowthSlowdown`: How much slower dirt paths regrow than normal random-tick grass spreading. The default `4` makes regrowth four times less likely than normal grass spread.
 - `debug.debugLogging`: Enables detailed debug logging for watch and conversion decisions.
 
 ## Behavior Notes
@@ -16,6 +17,7 @@ Config file: `config/trample_grass-common.toml`
 - Any entity with a footprint on the ground can start or trigger watched grass, including players, mobs, and non-living entities.
 - Standing still on one block does not roll every tick. A roll happens when an entity enters a grass block that is already being watched by earlier traffic.
 - Larger entities can affect every grass block under their collision box.
+- Any dirt path in a loaded, ticking chunk is checked like a grass block on a random tick: if grass could not survive there, it becomes dirt; if conditions are bright and valid, it can regrow itself into grass. Regrowth follows the world's `randomTickSpeed` and defaults to four times slower than normal grass spread.
 
 ## Compatibility
 

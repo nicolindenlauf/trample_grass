@@ -2,11 +2,18 @@ package com.niconator.tramplegrass;
 
 import com.mojang.logging.LogUtils;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.SnowLayerBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.lighting.LightEngine;
 import net.minecraft.world.phys.AABB;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -14,6 +21,8 @@ import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.level.ChunkEvent;
+import net.neoforged.neoforge.event.level.LevelEvent;
 import net.neoforged.neoforge.event.tick.EntityTickEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 import org.slf4j.Logger;
@@ -80,18 +89,109 @@ public class TrampleGrass {
             return;
         }
 
-        LevelTrampleData data = LEVEL_DATA.get(serverLevel);
-        if (data == null || data.watchedBlocks.isEmpty()) {
-            return;
-        }
-
+        LevelTrampleData data = dataFor(serverLevel);
         long gameTime = serverLevel.getGameTime();
+        tickWatchedGrass(serverLevel, data, gameTime);
+        tickPathRegrowth(serverLevel, data);
+    }
+
+    @SubscribeEvent
+    public void onChunkLoad(ChunkEvent.Load event) {
+        if (event.getLevel() instanceof ServerLevel serverLevel) {
+            dataFor(serverLevel).loadedChunks.add(event.getChunk().getPos().toLong());
+        }
+    }
+
+    @SubscribeEvent
+    public void onChunkUnload(ChunkEvent.Unload event) {
+        if (event.getLevel() instanceof ServerLevel serverLevel) {
+            LevelTrampleData data = LEVEL_DATA.get(serverLevel);
+            if (data != null) {
+                data.loadedChunks.remove(event.getChunk().getPos().toLong());
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public void onLevelUnload(LevelEvent.Unload event) {
+        if (event.getLevel() instanceof ServerLevel serverLevel) {
+            LEVEL_DATA.remove(serverLevel);
+        }
+    }
+
+    private static void tickWatchedGrass(ServerLevel level, LevelTrampleData data, long gameTime) {
         Iterator<Map.Entry<BlockPos, WatchedGrassBlock>> iterator = data.watchedBlocks.entrySet().iterator();
         while (iterator.hasNext()) {
             Map.Entry<BlockPos, WatchedGrassBlock> entry = iterator.next();
-            if (entry.getValue().expiresAtTick < gameTime || !serverLevel.getBlockState(entry.getKey()).is(Blocks.GRASS_BLOCK)) {
+            if (entry.getValue().expiresAtTick < gameTime || !level.getBlockState(entry.getKey()).is(Blocks.GRASS_BLOCK)) {
                 iterator.remove();
             }
+        }
+    }
+
+    private static void tickPathRegrowth(ServerLevel level, LevelTrampleData data) {
+        if (data.loadedChunks.isEmpty()) {
+            return;
+        }
+
+        int randomTickSpeed = level.getGameRules().getInt(GameRules.RULE_RANDOMTICKING);
+        if (randomTickSpeed <= 0) {
+            return;
+        }
+
+        Iterator<Long> iterator = data.loadedChunks.iterator();
+        while (iterator.hasNext()) {
+            long chunkPosLong = iterator.next();
+            if (!level.getChunkSource().hasChunk(ChunkPos.getX(chunkPosLong), ChunkPos.getZ(chunkPosLong))) {
+                iterator.remove();
+                continue;
+            }
+
+            if (!level.shouldTickBlocksAt(chunkPosLong)) {
+                continue;
+            }
+
+            tickPathRegrowthInChunk(level, chunkPosLong, randomTickSpeed);
+        }
+    }
+
+    private static void tickPathRegrowthInChunk(ServerLevel level, long chunkPosLong, int randomTickSpeed) {
+        ChunkPos chunkPos = new ChunkPos(chunkPosLong);
+        BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
+        int minSection = level.getMinSection();
+        int maxSection = level.getMaxSection();
+        for (int sectionY = minSection; sectionY < maxSection; sectionY++) {
+            int baseY = sectionY << 4;
+            for (int attempt = 0; attempt < randomTickSpeed; attempt++) {
+                mutablePos.set(
+                        chunkPos.getBlockX(level.random.nextInt(16)),
+                        baseY + level.random.nextInt(16),
+                        chunkPos.getBlockZ(level.random.nextInt(16))
+                );
+                tickPathLikeGrass(level, mutablePos);
+            }
+        }
+    }
+
+    private static void tickPathLikeGrass(ServerLevel level, BlockPos pos) {
+        if (!level.getBlockState(pos).is(Blocks.DIRT_PATH)) {
+            return;
+        }
+
+        BlockState grassState = Blocks.GRASS_BLOCK.defaultBlockState();
+        if (!canGrassSurvive(grassState, level, pos)) {
+            level.setBlockAndUpdate(pos, Blocks.DIRT.defaultBlockState());
+            debug("Turned dirt path into dirt because grass cannot survive at " + format(pos));
+            return;
+        }
+
+        if (
+                level.getMaxLocalRawBrightness(pos.above()) >= 9
+                        && (Config.pathRegrowthSlowdown <= 1 || level.random.nextInt(Config.pathRegrowthSlowdown) == 0)
+                        && canPropagateGrass(grassState, level, pos)
+        ) {
+            level.setBlockAndUpdate(pos, grassState);
+            debug("Regrew dirt path into grass at " + format(pos));
         }
     }
 
@@ -157,6 +257,33 @@ public class TrampleGrass {
         return positions;
     }
 
+    private static boolean canPropagateGrass(BlockState state, ServerLevel level, BlockPos pos) {
+        return canGrassSurvive(state, level, pos) && !level.getFluidState(pos.above()).is(FluidTags.WATER);
+    }
+
+    private static boolean canGrassSurvive(BlockState state, ServerLevel level, BlockPos pos) {
+        BlockPos abovePos = pos.above();
+        BlockState aboveState = level.getBlockState(abovePos);
+        if (aboveState.is(Blocks.SNOW) && aboveState.getValue(SnowLayerBlock.LAYERS) == 1) {
+            return true;
+        }
+
+        if (aboveState.getFluidState().getAmount() == 8) {
+            return false;
+        }
+
+        int lightBlock = LightEngine.getLightBlockInto(
+                level,
+                state,
+                pos,
+                aboveState,
+                abovePos,
+                Direction.UP,
+                aboveState.getLightBlock(level, abovePos)
+        );
+        return lightBlock < level.getMaxLightLevel();
+    }
+
     private static void clearEntityFootprint(ServerLevel level, UUID entityId) {
         if (level == null) {
             return;
@@ -209,6 +336,7 @@ public class TrampleGrass {
     private static final class LevelTrampleData {
         private final Map<BlockPos, WatchedGrassBlock> watchedBlocks = new HashMap<>();
         private final Map<UUID, Set<BlockPos>> entityFootprints = new HashMap<>();
+        private final Set<Long> loadedChunks = new HashSet<>();
     }
 
     private static final class WatchedGrassBlock {
