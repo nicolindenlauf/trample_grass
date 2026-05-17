@@ -139,11 +139,10 @@ public class TrampleGrass {
             return;
         }
 
-        Iterator<Long> iterator = data.loadedChunks.iterator();
-        while (iterator.hasNext()) {
-            long chunkPosLong = iterator.next();
+        Set<Long> loadedChunks = new HashSet<>(data.loadedChunks);
+        for (long chunkPosLong : loadedChunks) {
             if (!level.getChunkSource().hasChunk(ChunkPos.getX(chunkPosLong), ChunkPos.getZ(chunkPosLong))) {
-                iterator.remove();
+                data.loadedChunks.remove(chunkPosLong);
                 continue;
             }
 
